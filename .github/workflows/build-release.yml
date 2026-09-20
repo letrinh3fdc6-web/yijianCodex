@@ -1,0 +1,101 @@
+name: Build and release macOS installer
+
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    name: Validate on ${{ matrix.arch }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: arm64
+            runner: macos-15
+          - arch: x64
+            runner: macos-15-intel
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Validate installer source
+        run: bash macos/test-installer.sh
+
+      - name: Verify remote dependencies
+        run: bash macos/verify-dependencies.sh
+
+  package:
+    name: Build universal DMG
+    needs: validate
+    runs-on: macos-15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Resolve package version
+        id: version
+        shell: bash
+        run: |
+          set -euo pipefail
+          version="0.0.${GITHUB_RUN_NUMBER}"
+          if [[ "${GITHUB_REF_TYPE}" == "tag" ]]; then
+            version="${GITHUB_REF_NAME#v}"
+          fi
+          printf 'value=%s\n' "$version" >> "$GITHUB_OUTPUT"
+
+      - name: Build macOS DMG
+        run: bash macos/build-dmg.sh --clean --version '${{ steps.version.outputs.value }}'
+
+      - name: Upload macOS artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: Anyu-One-Click-Codex-macOS
+          path: |
+            dist/Anyu-One-Click-Codex-macOS-universal.dmg
+            dist/Anyu-One-Click-Codex-macOS-universal.dmg.sha256
+          if-no-files-found: error
+          retention-days: 30
+
+  release:
+    name: Publish GitHub Release
+    needs: package
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Download macOS artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: Anyu-One-Click-Codex-macOS
+          path: release-assets
+
+      - name: Verify release files
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -s release-assets/Anyu-One-Click-Codex-macOS-universal.dmg
+          test -s release-assets/Anyu-One-Click-Codex-macOS-universal.dmg.sha256
+          cd release-assets
+          shasum -a 256 -c Anyu-One-Click-Codex-macOS-universal.dmg.sha256
+
+      - name: Publish release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_name }}
+          name: 安域一键配置 Codex ${{ github.ref_name }}
+          generate_release_notes: true
+          body: |
+            macOS 通用安装器支持 Apple Silicon 与 Intel，适用于 macOS 12 或更高版本。
+
+            下载 DMG 后，将应用拖入“应用程序”并双击运行。若首次打开被系统阻止，请参考仓库 README 中的 `xattr` 命令。
+          files: |
+            release-assets/Anyu-One-Click-Codex-macOS-universal.dmg
+            release-assets/Anyu-One-Click-Codex-macOS-universal.dmg.sha256
