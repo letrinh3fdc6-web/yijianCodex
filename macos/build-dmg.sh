@@ -147,6 +147,6 @@ trap cleanup EXIT
   exit 1
 }
 /usr/bin/codesign --verify --deep --strict --verbose=2 "$MOUNT_POINT/$APP_NAME.app"
-/usr/bin/shasum -a 256 "$DMG_PATH" > "$DMG_PATH.sha256"
+(cd "$DIST_DIRECTORY" && /usr/bin/shasum -a 256 "$(/usr/bin/basename "$DMG_PATH")") > "$DMG_PATH.sha256"
 
 printf '已生成 macOS 通用安装器：%s\n' "$DMG_PATH"
